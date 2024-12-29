@@ -695,7 +695,7 @@ def cron_job():
             update_repo_details(repo_name, enterprise, contributors, last_snapshot, start_date)
         
         print('Update DONE',flush=True)
-        sleep(3600)
+        sleep(10)
 
 
 
