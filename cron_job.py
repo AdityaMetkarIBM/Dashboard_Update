@@ -695,9 +695,13 @@ def cron_job():
             update_repo_details(repo_name, enterprise, contributors, last_snapshot, start_date)
         
         print('Update DONE',flush=True)
-        sleep(10)
+        sleep(3600)
 
+
+@app.route('/')
+def home():
+    return jsonify({'message':'cron_job'}), 200
 
 
 cron_job()
-app.run()
+app.run(port=5000)
