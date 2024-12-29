@@ -679,10 +679,10 @@ def cron_job():
 
 
     while True:
-        print('Update Started')
+        print('Update Started',flush=True)
         
         for repo in repo_collection.find({}):
-            print(f"Updating -> {repo['repo_name']}")
+            print(f"Updating -> {repo['repo_name']}",flush=True)
 
             repo_name = repo['repo_name']
             enterprise = repo['enterprise']
@@ -694,12 +694,12 @@ def cron_job():
             # if repo_name in ('IBM/ibm-spectrum-scale-csi'):
             update_repo_details(repo_name, enterprise, contributors, last_snapshot, start_date)
         
-        print('Update DONE')
+        print('Update DONE',flush=True)
         sleep(3600)
 
 
-if __name__ == '__main__':
-    print('Main function')
-    app.logger.info('Main Function Logger')
-    cron_job()
-    app.run()
+
+print('Main function',flush=True)
+app.logger.info('Main Function Logger')
+cron_job()
+app.run()
