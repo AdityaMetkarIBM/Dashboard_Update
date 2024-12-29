@@ -1,6 +1,7 @@
 aniso8601==9.0.1
 blinker==1.8.2
 cachelib==0.13.0
+celery==5.4.0
 certifi==2024.8.30
 cffi==1.17.1
 charset-normalizer==3.3.2
