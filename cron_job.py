@@ -8,7 +8,7 @@ from flask_session import Session
 from datetime import datetime,timedelta
 import json
 
-from threading import Thread
+from celery import Celery
 from time import sleep
 import logging
 
@@ -40,6 +40,21 @@ db = client['dashboard']
 
 # FLASK APP ---------------------
 app = Flask(__name__)
+
+
+
+# Configure Celery
+def make_celery(app):
+    celery = Celery(
+        app.import_name,
+        backend=os.getenv('REDIS'),  # Celery result backend (Redis)
+        broker=os.getenv('REDIS'),   # Celery message broker (Redis)
+    )
+    celery.conf.update(app.config)
+    return celery
+
+celery = make_celery(app)
+
 
 
 
@@ -669,7 +684,7 @@ def handle_push_event(event, full_repo, BASE_URL, HEADERS):
 
 
 
-
+@celery.task
 def cron_job():
 
     user_collection = db["IBM_user_data"]
@@ -700,8 +715,14 @@ def cron_job():
 
 @app.route('/')
 def home():
-    return jsonify({'message':'cron_job'}), 200
+    return jsonify({'message': 'cron_job is running indefinitely!'}), 200
 
 
-cron_job()
-app.run(port=5000)
+@app.before_first_request
+def start_cron_job():
+
+    print('Background Taks Started')
+    cron_job.delay()
+
+if __name__ == "__main__":
+    app.run()
