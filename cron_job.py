@@ -679,7 +679,7 @@ def cron_job():
 
 
     while True:
-        print('Update Started',flush=True)
+        print(f'Update Started <-> {datetime.today()}',flush=True)
         
         for repo in repo_collection.find({}):
             print(f"Updating -> {repo['repo_name']}",flush=True)
@@ -699,7 +699,5 @@ def cron_job():
 
 
 
-print('Main function',flush=True)
-app.logger.info('Main Function Logger')
 cron_job()
 app.run()
