@@ -9,6 +9,7 @@ from datetime import datetime,timedelta
 import json
 
 from celery import Celery
+from celery.utils.log import get_task_logger
 from time import sleep
 import logging
 
@@ -44,16 +45,8 @@ app = Flask(__name__)
 
 
 # Configure Celery
-def make_celery(app):
-    celery = Celery(
-        app.import_name,
-        backend=os.getenv('REDIS'),  # Celery result backend (Redis)
-        broker=os.getenv('REDIS'),   # Celery message broker (Redis)
-    )
-    celery.conf.update(app.config)
-    return celery
-
-celery = make_celery(app)
+celery_app = Celery('tasks', broker=os.getenv("REDIS"))
+logger = get_task_logger(__name__)
 
 
 
@@ -684,7 +677,7 @@ def handle_push_event(event, full_repo, BASE_URL, HEADERS):
 
 
 
-@celery.task
+@celery_app.task
 def cron_job():
 
     user_collection = db["IBM_user_data"]
@@ -694,10 +687,10 @@ def cron_job():
 
 
     while True:
-        print(f'Update Started <-> {datetime.today()}',flush=True)
+        logger.info(f'Update Started <-> {datetime.today()}',flush=True)
         
         for repo in repo_collection.find({}):
-            print(f"Updating -> {repo['repo_name']}",flush=True)
+            logger.info(f"Updating -> {repo['repo_name']}",flush=True)
 
             repo_name = repo['repo_name']
             enterprise = repo['enterprise']
@@ -709,20 +702,15 @@ def cron_job():
             # if repo_name in ('IBM/ibm-spectrum-scale-csi'):
             update_repo_details(repo_name, enterprise, contributors, last_snapshot, start_date)
         
-        print('Update DONE',flush=True)
-        sleep(3600)
+        logger.info('Update DONE',flush=True)
+        sleep(10)
 
 
 @app.route('/')
 def home():
+    cron_job.delay()
     return jsonify({'message': 'cron_job is running indefinitely!'}), 200
 
-
-@app.before_first_request
-def start_cron_job():
-
-    print('Background Taks Started')
-    cron_job.delay()
 
 if __name__ == "__main__":
     app.run()
