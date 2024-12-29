@@ -699,5 +699,7 @@ def cron_job():
 
 
 if __name__ == '__main__':
+    print('Main function')
+    app.logger.info('Main Function Logger')
     cron_job()
     app.run()
