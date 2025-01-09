@@ -8,10 +8,8 @@ from flask_session import Session
 from datetime import datetime,timedelta
 import json
 
-from celery import Celery
-from celery.utils.log import get_task_logger
+
 from time import sleep
-import logging
 
 # Load environment variable
 load_dotenv()
@@ -44,11 +42,9 @@ app = Flask(__name__)
 
 
 
-# Configure Celery
-celery_app = Celery('tasks', broker=os.getenv("REDIS"))
-logger = get_task_logger(__name__)
-
-
+# Global Variables --->
+BASE_URL = None
+HEADERS = None
 
 
 
@@ -64,8 +60,8 @@ def get_start_date():
 
 def get_commit_details_from_SHA(repo_full_name, sha):
 
-    url = f"{session['BASE_URL']}/repos/{repo_full_name}/commits/{sha}"
-    response = requests.get(url, headers=session['HEADERS'])
+    url = f"{BASE_URL}/repos/{repo_full_name}/commits/{sha}"
+    response = requests.get(url, headers=HEADERS)
 
     if response.status_code == 200:
         commit_data = response.json()
@@ -95,7 +91,7 @@ def get_commit_details_from_SHA(repo_full_name, sha):
 # -- GROUP
 def get_pr_details_commits_comments(repo_full_name, username, start_date):
 
-    base_url = f"{session['BASE_URL']}/repos/{repo_full_name}"
+    base_url = f"{BASE_URL}/repos/{repo_full_name}"
     pull_details_list = []
     page = 1
     per_page = 100  # Adjust the number of results per page if necessary
@@ -108,7 +104,7 @@ def get_pr_details_commits_comments(repo_full_name, username, start_date):
 
         while True:
             paginated_url = f"{url}?per_page={per_page}&page={page}"
-            response = requests.get(paginated_url, headers=session['HEADERS'])
+            response = requests.get(paginated_url, headers=HEADERS)
             
             if response.status_code != 200:
                 print(f"Error fetching data from {paginated_url}: {response.json()}")
@@ -126,7 +122,7 @@ def get_pr_details_commits_comments(repo_full_name, username, start_date):
     def get_pr_commits(pr_number, username):
         detailed_commits = []
 
-        commits_url = f"{session['BASE_URL']}/repos/{repo_full_name}/pulls/{pr_number}/commits"
+        commits_url = f"{BASE_URL}/repos/{repo_full_name}/pulls/{pr_number}/commits"
         commits = get_paginated_data(commits_url)
         
         # Filter commits by username
@@ -144,7 +140,7 @@ def get_pr_details_commits_comments(repo_full_name, username, start_date):
 
         comments_data = []
 
-        review_url = f"{session['BASE_URL']}/repos/{repo_full_name}/pulls/{pr_number}/reviews"
+        review_url = f"{BASE_URL}/repos/{repo_full_name}/pulls/{pr_number}/reviews"
         reviews = get_paginated_data(review_url)
 
         for review in reviews:
@@ -184,7 +180,7 @@ def get_pr_details_commits_comments(repo_full_name, username, start_date):
     while True:
         # Step 1: Get all pull requests with pagination
         pulls_url = f"{base_url}/pulls?state=all&per_page={per_page}&page={page}"
-        response = requests.get(pulls_url, headers=session['HEADERS'])
+        response = requests.get(pulls_url, headers=HEADERS)
         
         if response.status_code != 200:
             print(f"Error fetching pull requests: {response.json()}")
@@ -208,7 +204,7 @@ def get_pr_details_commits_comments(repo_full_name, username, start_date):
             #To HANDLE - If someone approves review, they are removed from requested_reviewers
             try:
                 review_url = f"{base_url}/pulls/{pr['number']}/reviews?per_page={per_page}"
-                response = requests.get(review_url, headers=session['HEADERS']).json()
+                response = requests.get(review_url, headers=HEADERS).json()
                 requested_reviewers += list(set(user['user']['login'] for user in response))
             except:
                 pass
@@ -250,8 +246,8 @@ def get_pr_details_commits_comments(repo_full_name, username, start_date):
 
 def get_pr_details(repo_full_name, pr_number):
 
-        url = f"{session['BASE_URL']}/repos/{repo_full_name}/pulls/{pr_number}"
-        response = requests.get(url, headers=session['HEADERS'])
+        url = f"{BASE_URL}/repos/{repo_full_name}/pulls/{pr_number}"
+        response = requests.get(url, headers=HEADERS)
         
         if response.status_code == 200:
             data = response.json()
@@ -285,17 +281,7 @@ def get_pr_details(repo_full_name, pr_number):
 
 # UPDATE FUNCTIONS ------------------------------>
 
-def update_repo_details(full_repo, enterprise, contributors, last_snapshot, start_date):
-
-    # Check for Public / Enterprise --> Set Session BASE_URL and HEADERS
-    if enterprise:
-        BASE_URL = "https://api.github.ibm.com"
-        HEADERS = set_headers(os.getenv('GITHUB_ENTERPRISE'))
-    else:
-        BASE_URL = "https://api.github.com"
-        HEADERS = set_headers(os.getenv('GITHUB_TOKEN'))
-
-
+def update_repo_details(full_repo, contributors, last_snapshot, start_date):
 
     page = 1
     checkpoint_reached = False  # Last Saved Snapshot
@@ -376,7 +362,7 @@ def update_repo_details(full_repo, enterprise, contributors, last_snapshot, star
                                 new_updates[username][issue_no] = data
 
                     case 'PullRequestEvent':
-                        new, data = handle_pull_request_event(event, full_repo, username, HEADERS)
+                        new, data = handle_pull_request_event(event, full_repo, username)
 
                         if new:
                             new_updates[username]['new_prs'] += [data]
@@ -390,7 +376,7 @@ def update_repo_details(full_repo, enterprise, contributors, last_snapshot, star
                             new_updates[username][pr_no]['pr_details'] = data
 
                     case 'PullRequestReviewEvent':
-                        pr_no,comments = handle_pull_request_review_event(event, username, HEADERS)
+                        pr_no,comments = handle_pull_request_review_event(event, username)
                         pr_details = get_pr_details(event['repo']['name'], event['payload']['pull_request']['number'])
 
                         if pr_no not in new_updates[username]:
@@ -402,12 +388,17 @@ def update_repo_details(full_repo, enterprise, contributors, last_snapshot, star
                             new_updates[username][pr_no]['pr_details'] = pr_details
 
                     case 'PushEvent':
-                        pr_no,commits = handle_push_event(event, full_repo, BASE_URL, HEADERS)
+                        pr_no,commits = handle_push_event(event, full_repo)
+                        print('Push Event',pr_no,'commits->',len(commits))
 
                         for commit in commits:
                             
-                            commitor = commit['commit']['author']['name']
                             commit_data = get_commit_details_from_SHA(full_repo, commit['sha'])
+
+                            if commit['author']:
+                                commitor = commit['author']['login']
+                            else:
+                                commitor = commit['committer']['login']
 
                             if commitor not in new_updates:
                                 new_updates[commitor] = {
@@ -425,7 +416,7 @@ def update_repo_details(full_repo, enterprise, contributors, last_snapshot, star
                                     new_updates[commitor][pr_no] = {'pr_details': None, 'commits': [], 'comments': []}
 
                                 new_updates[commitor][pr_no]['commits'] += [commit]
-                                print(f"PR Commit - {commitor}", pr_no)
+                                print(f"PR Commit - {commitor}")
 
                                 pr_details = get_pr_details(full_repo, pr_no)
                                 if pr_details:
@@ -445,12 +436,13 @@ def update_repo_details(full_repo, enterprise, contributors, last_snapshot, star
     # If checkpoint not found -- 90 days gap  
     # if not checkpoint_reached:
     #     return 'not_found'
-
+            
 
     # ---> Update database repo_details with the <new_updates> dict
 
     data_collection = db['IBM_github_data']
     repo_collection = db['IBM_repositories']
+
 
     for username in new_updates:
 
@@ -489,22 +481,22 @@ def update_repo_details(full_repo, enterprise, contributors, last_snapshot, star
         # Update PRs
         for idx,pr in enumerate(repo_details['pull_requests']):
 
-            if str(pr['pr_number']) in new_updates[username]:
+            if pr['pr_number'] in new_updates[username]:
                 
-                pr_changes = new_updates[username][str(pr['pr_number'])]
+                pr_changes = new_updates[username][pr['pr_number']]
 
 
                 # If new detail changes
-                if pr_changes['pr_details']:
+                if pr_changes.get('pr_details', None):
                     repo_details['pull_requests'][idx]['pr_details'] = pr_changes['pr_details']
                 
-                if pr_changes['commits']:
+                if pr_changes.get('commits', None):
                     repo_details['pull_requests'][idx]['commits'] = pr_changes['commits']
                 
-                if pr_changes['comments']:
+                if pr_changes.get('comments', None):
                     repo_details['pull_requests'][idx]['comments'] += pr_changes['comments']
             
-                del new_updates[username][str(pr['pr_number'])]
+                del new_updates[username][pr['pr_number']]
 
         # If anything remains, it is a new pull request with comments --> So append it directly
         for pr_no in new_updates[username]:
@@ -547,7 +539,7 @@ def handle_issue_event(event, username):
     else:
         return False, (issue['number'], issue_data)
     
-def handle_pull_request_event(event, full_repo, username, HEADERS):
+def handle_pull_request_event(event, full_repo, username):
 
     data = event['payload']['pull_request']
     pr_details = {
@@ -607,7 +599,7 @@ def handle_pull_request_event(event, full_repo, username, HEADERS):
         # Return the current PR directly
         return False, (pr_details['number'], pr_details)
 
-def handle_pull_request_review_event(event,username,HEADERS):
+def handle_pull_request_review_event(event,username):
     
     comments_data = []
     review = event['payload']['review']
@@ -647,7 +639,7 @@ def handle_pull_request_review_event(event,username,HEADERS):
     
     return event['payload']['pull_request']['number'],comments_data
 
-def handle_push_event(event, full_repo, BASE_URL, HEADERS):
+def handle_push_event(event, full_repo):
 
     commit =  event['payload']['commits'][-1]
     commit_sha = commit['sha']
@@ -677,7 +669,6 @@ def handle_push_event(event, full_repo, BASE_URL, HEADERS):
 
 
 
-@celery_app.task
 def cron_job():
 
     user_collection = db["IBM_user_data"]
@@ -685,32 +676,39 @@ def cron_job():
     mappings_collection = db['IBM_user_mappings']
     repo_collection = db['IBM_repositories']
 
+    global BASE_URL
+    global HEADERS
+
 
     while True:
-        logger.info(f'Update Started <-> {datetime.today()}',flush=True)
+        print(f'Update Started <-> {datetime.today()}',flush=True)
         
         for repo in repo_collection.find({}):
-            logger.info(f"Updating -> {repo['repo_name']}",flush=True)
+            print(f"Updating -> {repo['repo_name']}",flush=True)
 
             repo_name = repo['repo_name']
             enterprise = repo['enterprise']
             contributors = repo['contributors']
             last_snapshot = repo['snapshot']
 
+
+            # Check for Public / Enterprise --> Set Session BASE_URL and HEADERS
+            if enterprise:
+                BASE_URL = "https://api.github.ibm.com"
+                HEADERS = set_headers(os.getenv('GITHUB_ENTERPRISE'))
+            else:
+                BASE_URL = "https://api.github.com"
+                HEADERS = set_headers(os.getenv('GITHUB_TOKEN'))
+
+
             start_date = get_start_date()
 
             # if repo_name in ('IBM/ibm-spectrum-scale-csi'):
-            update_repo_details(repo_name, enterprise, contributors, last_snapshot, start_date)
+            update_repo_details(repo_name, contributors, last_snapshot, start_date)
         
-        logger.info('Update DONE',flush=True)
-        sleep(10)
+        print('Update DONE',flush=True)
+        sleep(3600)
 
 
-@app.route('/')
-def home():
-    cron_job.delay()
-    return jsonify({'message': 'cron_job is running indefinitely!'}), 200
-
-
-if __name__ == "__main__":
-    app.run()
+if __name__ == '__main__':
+    cron_job()
